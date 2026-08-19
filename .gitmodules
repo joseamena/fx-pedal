@@ -1,0 +1,3 @@
+[submodule "nam-ladspa/NeuralAmpModelerCore"]
+	path = nam-ladspa/NeuralAmpModelerCore
+	url = https://github.com/sdatkinson/NeuralAmpModelerCore

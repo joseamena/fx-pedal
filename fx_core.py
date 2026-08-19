@@ -40,6 +40,14 @@ LOCK_PATH = Path.home() / ".config/pipewire/fx-pedal.lock"
 SOCKET_PATH = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "fx-pedal.sock"
 AUDIO_DEVICE_CONFIG_PATH = Path.home() / ".config/pipewire/fx-pedal-audio-device.json"
 
+# Fixed path the NAM LADSPA plugin (label 'nam_amp') falls back to reading its
+# .nam model from at instantiate() time - LADSPA has no string/config ports,
+# so this is the only way to point it at a model without recompiling. Must
+# match ResolveModelPath()'s default in the plugin's own source
+# (nam_ladspa.cpp) - fx-pedal manages this as a symlink, never the file
+# content itself, so switching models never means copying/importing anything.
+NAM_MODEL_LINK_PATH = Path.home() / ".config/fx-pedal/nam_model.nam"
+
 DEFAULT_SLOTS_PER_BANK = 8
 LOCK_TIMEOUT_S = 10
 
@@ -734,6 +742,87 @@ def bank_midi_map():
                 "preset": preset,
             })
     return {"ok": True, "slots_per_bank": slots_per_bank, "map": table}
+
+
+# ---- NAM (Neural Amp Modeler) model switching ----
+#
+# The nam_amp LADSPA plugin (wraps NeuralAmpModelerCore) only reads its .nam
+# model file once, at PipeWire filter-chain startup - there's no LADSPA
+# mechanism to change it live. So "switching models" here always means: point
+# NAM_MODEL_LINK_PATH's symlink at a new file, then restart pipewire.service,
+# same as any other topology change. The .nam file itself is expected to
+# already exist on this filesystem (e.g. an external app manages a library of
+# captures and drops them somewhere) - fx-pedal only ever manages the symlink,
+# never copies or imports the file's contents.
+
+def _validate_nam_file(path):
+    """Cheap pre-check before triggering a ~3s PipeWire restart: catches an
+    obviously-wrong file (missing, truncated, not a .nam file at all).
+    Deliberately not a full NAM format validator - the plugin's own loader
+    (nam::get_dsp) is the real authority and runs right after the restart;
+    _nam_load_warning() surfaces what it found."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        return f"'{path}' is not readable/valid JSON: {e}"
+    if "architecture" not in data or "weights" not in data:
+        return f"'{path}' doesn't look like a .nam model file (missing architecture/weights)."
+    return None
+
+
+def _nam_load_warning():
+    """nam_ladspa logs to stderr and falls back to clean passthrough rather
+    than crashing when its .nam file fails to load (see nam_ladspa.cpp) - so
+    a restart can succeed at the systemd level while the model silently
+    didn't load. Check the journal so callers find out now instead of by
+    ear."""
+    result = subprocess.run(
+        ["journalctl", "--user", "-u", "pipewire.service", "--since", "10 seconds ago",
+         "--no-pager", "--grep", "nam_ladspa:"], capture_output=True, text=True)
+    lines = [l for l in result.stdout.splitlines() if "nam_ladspa:" in l]
+    return lines[-1].split("nam_ladspa:", 1)[-1].strip() if lines else None
+
+
+def nam_model_get():
+    if not NAM_MODEL_LINK_PATH.is_symlink() and not NAM_MODEL_LINK_PATH.exists():
+        return {"ok": True, "path": None}
+    try:
+        target = NAM_MODEL_LINK_PATH.resolve(strict=True)
+    except OSError:
+        return {"ok": True, "path": None,
+                "warning": f"{NAM_MODEL_LINK_PATH} is set but the file it points to is missing."}
+    return {"ok": True, "path": str(target)}
+
+
+def nam_model_set(path):
+    with _locked():
+        src = Path(path).expanduser()
+        if not src.is_absolute():
+            return {"ok": False, "kind": "topology", "error": f"Path must be absolute, got: {path!r}"}
+        if not src.exists():
+            return {"ok": False, "kind": "topology", "error": f"No such file: {src}"}
+        err = _validate_nam_file(src)
+        if err:
+            return {"ok": False, "kind": "topology", "error": err}
+
+        NAM_MODEL_LINK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if NAM_MODEL_LINK_PATH.is_symlink() or NAM_MODEL_LINK_PATH.exists():
+            NAM_MODEL_LINK_PATH.unlink()
+        NAM_MODEL_LINK_PATH.symlink_to(src)
+
+        state = load_state()
+        in_chain = any(fx["label"] == "nam_amp" for fx in state["chain"])
+        ok, err = _apply(state)
+        if not ok:
+            return {"ok": False, "kind": "topology",
+                    "error": f"Model file updated but PipeWire failed to restart: {err}"}
+
+        load_warning = _nam_load_warning() if in_chain else None
+        warning = load_warning or (None if in_chain else
+            "No 'nam_amp' effect is currently in the chain - this model will "
+            "be used the next time one is added.")
+        return {"ok": True, "kind": "topology", "warning": warning,
+                "message": f"NAM model set to '{src}'." + (" Reloaded." if in_chain else "")}
 
 
 def load_preset_for_pc(pc):

@@ -46,6 +46,8 @@ METHODS = {
     "bank_delete": lambda p: core.bank_delete(p["name"]),
     "bank_midi_map": lambda p: core.bank_midi_map(),
     "load_preset_for_pc": lambda p: core.load_preset_for_pc(p["pc"]),
+    "nam_model_get": lambda p: core.nam_model_get(),
+    "nam_model_set": lambda p: core.nam_model_set(p["path"]),
 }
 
 

@@ -349,6 +349,37 @@ consume — it doesn't need to know about banks or slots at all, just
 "PC number → preset name". `fx_core.load_preset_for_pc(pc)` does the full
 lookup-and-load in one call.
 
+### `nam-model get` / `nam-model set <path>`
+
+Get/set the `.nam` capture file loaded by the
+[nam-ladspa](nam-ladspa/README.md) plugin (label `nam_amp`) — real-time
+neural amp/pedal modeling as a LADSPA effect, wrapping
+[NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore).
+Not installed by default; see `nam-ladspa/README.md` for build/install.
+
+LADSPA has no file/string ports, so the model path can't be a normal `set`
+control — it's read once when the plugin loads. **Topology change** (~3s),
+even though the chain shape doesn't change, because the only way to make
+the plugin re-read a new file is to restart it.
+
+```
+$ fx-pedal add nam_amp
+Added 'Neural Amp Modeler (NAM Core)' (nam_amp) as 'namamp'.
+Chain is now: drive (foverdrive) -> namamp (nam_amp)
+
+$ fx-pedal nam-model set ~/models/marshall-plexi.nam
+NAM model set to '/home/arduino/models/marshall-plexi.nam'. Reloaded.
+```
+
+fx-pedal only manages a symlink at a fixed handoff path
+(`~/.config/fx-pedal/nam_model.nam`) pointed at whatever file you give it —
+it doesn't copy or import the `.nam` file's contents, so an external app
+(or you) can manage a whole library of captures anywhere on disk and just
+tell fx-pedal which one to point at. After restarting, it checks the
+journal for the plugin's own load diagnostics and surfaces a warning if the
+model failed to load (bad file, wrong format) instead of just trusting that
+PipeWire came back up.
+
 ## Where things live
 
 **Source** (this repo): `fx_ctl.py` (CLI), `fx_core.py` (all real logic —
@@ -366,6 +397,11 @@ long-running process), `fx_daemon.py` (the socket server),
   `audio-device select` (absent = auto-detect).
 - `fx-pedal.lock` — internal, serializes concurrent operations. Never
   needs manual attention.
+
+**`~/.config/fx-pedal/nam_model.nam`** (not under `~/.config/pipewire/`,
+since it's not PipeWire-specific state) — a symlink managed by
+`nam-model set`, pointing at whichever `.nam` file the
+[nam-ladspa](nam-ladspa/README.md) plugin currently loads.
 
 None of the runtime state is checked into this repo (see `.gitignore`) —
 it's regenerated per-install/per-board.
@@ -399,7 +435,8 @@ Don't shell out to `fx_ctl.py` from another long-running process — `import
 fx_core` directly (or talk to the daemon's Unix socket — see `fx_daemon.py`'s
 `METHODS` table for the exact protocol) and call its functions
 (`add_effect`, `remove_effect`, `set_control`, `preset_save/load/list/
-delete`, `bank_*`, `load_preset_for_pc`, `audio_device_list/select`). Every
+delete`, `bank_*`, `load_preset_for_pc`, `audio_device_list/select`,
+`nam_model_get/set`). Every
 function takes its own lock and returns a plain dict — `{"ok": bool,
 "kind": "live"|"topology", "message"|"error": str, ...}` — no printing, no
 `sys.exit`, safe to call from anywhere.

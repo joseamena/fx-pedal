@@ -223,6 +223,20 @@ def cmd_audio_device_select(args):
         sys.exit(1)
 
 
+def cmd_nam_model_get(args):
+    r = core.nam_model_get()
+    if not r["ok"]:
+        sys.exit(r.get("error", "Unknown error"))
+    if r.get("warning"):
+        print(f"Warning: {r['warning']}", file=sys.stderr)
+    print(r["path"] or "(not set)")
+
+
+def cmd_nam_model_set(args):
+    if not _print_result(core.nam_model_set(args.path)):
+        sys.exit(1)
+
+
 # ---- console mode: interactive prompt attached to the fx-pedal daemon ----
 
 class DaemonClient:
@@ -425,6 +439,34 @@ class FxConsole(cmd_module.Cmd):
         else:
             print(f"unknown bank subcommand {sub!r}")
 
+    # -- NAM model --
+    def do_nam(self, arg):
+        "nam get|set <path> - Get/set the .nam model file the NAM plugin loads."
+        try:
+            parts = shlex.split(arg)
+        except ValueError as e:
+            print(f"parse error: {e}")
+            return
+        if not parts:
+            print("usage: nam get|set <path>")
+            return
+        sub, rest = parts[0], parts[1:]
+        if sub == "get":
+            r = self.client.call("nam_model_get")
+            if r.get("warning"):
+                print(f"Warning: {r['warning']}")
+            print((r.get("path") or "(not set)") if r.get("ok") else r.get("error"))
+        elif sub == "set":
+            if not rest:
+                print("usage: nam set <path>")
+                return
+            r = self.client.call("nam_model_set", path=rest[0])
+            if r.get("warning"):
+                print(f"Warning: {r['warning']}")
+            print(r.get("message") or r.get("error"))
+        else:
+            print(f"unknown nam subcommand {sub!r}")
+
     # -- housekeeping --
     def do_h(self, arg):
         "h - Show this help."
@@ -537,6 +579,14 @@ def main():
     p = audio_sub.add_parser("select", help="Pin a specific device by its list number")
     p.add_argument("index", type=int)
     p.set_defaults(func=cmd_audio_device_select)
+
+    nam = sub.add_parser("nam-model", help="Get/set the .nam file the Neural Amp Modeler plugin loads")
+    nam_sub = nam.add_subparsers(dest="nam_cmd", required=True)
+    nam_sub.add_parser("get", help="Show the currently active .nam model file").set_defaults(
+        func=cmd_nam_model_get)
+    p = nam_sub.add_parser("set", help="Point the plugin at a different .nam file (restarts PipeWire)")
+    p.add_argument("path", help="Absolute path to a .nam model file")
+    p.set_defaults(func=cmd_nam_model_set)
 
     args = parser.parse_args()
     args.func(args)

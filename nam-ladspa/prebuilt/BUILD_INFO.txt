@@ -1,0 +1,17 @@
+nam_ladspa-aarch64-linux.so — build provenance
+================================================
+
+Built on: this project's own Arduino UNO Q board
+Architecture:   aarch64 (Qualcomm qcm2290 SoC)
+OS:             Debian GNU/Linux 13 (trixie)
+glibc:          2.41
+Compiler:       gcc/g++ 14.2.0
+CMake:          3.31.6
+Build type:     Release (-O3)
+NeuralAmpModelerCore commit: daae2d0b482a5fe876258caf3fdfe177044b6295
+  (matches the pinned git submodule at ../NeuralAmpModelerCore)
+sha256sum:      bff93fac416b272be63ba24c30ad5c1cd3ce611e5a17d91477b1f97999ce490a
+
+This is only expected to run, unmodified, on a matching architecture +
+compatible glibc. If it doesn't load on your machine, build from source —
+see ../README.md.
