@@ -44,9 +44,13 @@ def _print_result(result):
 
 # ---- shared formatting, used by both one-shot commands and the console ----
 
-def _format_plugins(plugins):
-    for p in plugins:
-        print(f"{p['label']:28s} {p['name']}")
+def _format_plugins(result):
+    for p in result["plugins"]:
+        marker = "  [not usable here - not mono in/out]" if p.get("compatible") is False else ""
+        print(f"{p['label']:28s} {p['name']}{marker}")
+    if result.get("hidden"):
+        print(f"\n({result['hidden']} plugin(s) hidden - not mono in/out, would fail `add`. "
+              "Use `list --all` to see them.)")
 
 
 def _format_params(plugin, ports):
@@ -108,7 +112,7 @@ def _format_midi_map(entries, show_all):
 # ---- one-shot commands (call fx_core directly) ----
 
 def cmd_list(args):
-    _format_plugins(core.list_plugins()["plugins"])
+    _format_plugins(core.list_plugins(args.all))
 
 
 def cmd_params(args):
@@ -278,10 +282,10 @@ class FxConsole(cmd_module.Cmd):
 
     # -- discovery --
     def do_l(self, arg):
-        "l - List all installed LADSPA plugins."
-        r = self.client.call("list_plugins")
+        "l [all] - List plugins usable in this chain (mono in/out). 'l all' includes the rest."
+        r = self.client.call("list_plugins", include_incompatible=(arg.strip() == "all"))
         if r["ok"]:
-            _format_plugins(r["plugins"])
+            _format_plugins(r)
         else:
             print(r["error"])
     do_list = do_l
@@ -532,7 +536,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("list", help="List all installed LADSPA plugins").set_defaults(func=cmd_list)
+    p = sub.add_parser("list", help="List LADSPA plugins usable in this chain (mono in/out)")
+    p.add_argument("--all", action="store_true",
+                    help="Include plugins that can't be added here (not mono in/out)")
+    p.set_defaults(func=cmd_list)
 
     p = sub.add_parser("params", help="Show the parameters (control ports) of a plugin")
     p.add_argument("label", help="LADSPA plugin label, e.g. foverdrive")

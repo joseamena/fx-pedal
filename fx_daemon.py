@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fx_core as core
 
 METHODS = {
-    "list_plugins": lambda p: core.list_plugins(),
+    "list_plugins": lambda p: core.list_plugins(p.get("include_incompatible", False)),
     "plugin_params": lambda p: core.plugin_params(p["label"]),
     "get_chain": lambda p: core.get_chain(),
     "add_effect": lambda p: core.add_effect(p["label"], p.get("controls")),

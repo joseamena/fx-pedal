@@ -55,7 +55,7 @@ ENV = {**os.environ, "LADSPA_PATH": str(LADSPA_PATH)}
 
 PORT_RE = re.compile(
     r'^"([^"]+)" (input|output), (control|audio)'
-    r'(?:, (-?[\d.]+) to (-?[\d.]+)(?:, default (-?[\d.]+))?)?$'
+    r'(?:, (-?[\d.]+|\.\.\.) to (-?[\d.]+|\.\.\.)(?:, default (-?[\d.]+))?)?$'
 )
 
 
@@ -114,12 +114,24 @@ def find_plugin(label):
     return next((p for p in scan_plugins() if p["label"] == label), None)
 
 
-def get_ports(so_path):
-    """Return the port list for a plugin (name/direction/type/min/max/default)."""
+def get_ports(so_path, label):
+    """Return the port list for one plugin label (name/direction/type/min/
+    max/default). A single .so can bundle several labeled plugins - caps.so
+    alone has 26 - and `analyseplugin <file>` (no way to address a single
+    label) prints all of them back-to-back. Split on 'Plugin Label:' first
+    so a different plugin sharing this file never gets its ports conflated
+    with this one's (that previously made several genuinely-mono plugins,
+    e.g. everything in caps.so, look falsely stereo)."""
     result = subprocess.run(["analyseplugin", so_path], capture_output=True, text=True, env=ENV)
+    blocks = re.split(r"(?=^Plugin Name:)", result.stdout, flags=re.MULTILINE)
+    block = next(
+        (b for b in blocks if re.search(rf'^Plugin Label: "{re.escape(label)}"$', b, re.MULTILINE)),
+        None)
+    if block is None:
+        return []
     ports = []
     in_ports = False
-    for line in result.stdout.splitlines():
+    for line in block.splitlines():
         if line.startswith("Ports:"):
             line = line[len("Ports:"):]
             in_ports = True
@@ -133,11 +145,26 @@ def get_ports(so_path):
             name, direction, ptype, lo, hi, default = m.groups()
             ports.append({
                 "name": name, "direction": direction, "type": ptype,
-                "min": float(lo) if lo is not None else None,
-                "max": float(hi) if hi is not None else None,
+                # analyseplugin prints "..." for a bound the plugin didn't specify
+                # (e.g. "0 to ..." for a lower-bounded-only control port).
+                "min": float(lo) if lo not in (None, "...") else None,
+                "max": float(hi) if hi not in (None, "...") else None,
                 "default": float(default) if default is not None else None,
             })
     return ports
+
+
+def _audio_port_counts(ports):
+    audio_in = sum(1 for p in ports if p["direction"] == "input" and p["type"] == "audio")
+    audio_out = sum(1 for p in ports if p["direction"] == "output" and p["type"] == "audio")
+    return audio_in, audio_out
+
+
+def is_mono_effect(so_path, label):
+    """True if a plugin has exactly the 1-audio-in/1-audio-out shape
+    add_effect() requires - the only thing this chain can host."""
+    audio_in, audio_out = _audio_port_counts(get_ports(so_path, label))
+    return audio_in == 1 and audio_out == 1
 
 
 def load_state():
@@ -443,15 +470,26 @@ def _pipewire_active():
 
 # ---- read-only, no lock needed ----
 
-def list_plugins():
-    return {"ok": True, "plugins": sorted(scan_plugins(), key=lambda p: p["name"].lower())}
+def list_plugins(include_incompatible=False):
+    """By default, only plugins this chain can actually host (1 audio in,
+    1 audio out - see is_mono_effect) - stereo effects like most reverbs
+    would just fail at `add` time otherwise, which was surfacing as a
+    confusing wall of unusable entries. Pass include_incompatible=True to
+    see everything, each tagged with whether it's usable here."""
+    plugins = sorted(scan_plugins(), key=lambda p: p["name"].lower())
+    if include_incompatible:
+        for p in plugins:
+            p["compatible"] = is_mono_effect(p["so_path"], p["label"])
+        return {"ok": True, "plugins": plugins}
+    compatible = [p for p in plugins if is_mono_effect(p["so_path"], p["label"])]
+    return {"ok": True, "plugins": compatible, "hidden": len(plugins) - len(compatible)}
 
 
 def plugin_params(label):
     plugin = find_plugin(label)
     if plugin is None:
         return {"ok": False, "error": f"No installed LADSPA plugin with label '{label}'."}
-    ports = get_ports(plugin["so_path"])
+    ports = get_ports(plugin["so_path"], plugin["label"])
     return {"ok": True, "plugin": plugin, "ports": ports}
 
 
@@ -476,15 +514,16 @@ def add_effect(label, controls=None):
         if plugin is None:
             return {"ok": False, "kind": "topology",
                     "error": f"No installed LADSPA plugin with label '{label}'."}
-        ports = get_ports(plugin["so_path"])
+        ports = get_ports(plugin["so_path"], plugin["label"])
 
-        audio_in = [p for p in ports if p["direction"] == "input" and p["type"] == "audio"]
-        audio_out = [p for p in ports if p["direction"] == "output" and p["type"] == "audio"]
-        if len(audio_in) != 1 or len(audio_out) != 1:
+        audio_in, audio_out = _audio_port_counts(ports)
+        if audio_in != 1 or audio_out != 1:
             return {"ok": False, "kind": "topology",
-                    "error": f"'{label}' has {len(audio_in)} audio input(s) and "
-                             f"{len(audio_out)} audio output(s) - only simple mono "
+                    "error": f"'{label}' has {audio_in} audio input(s) and "
+                             f"{audio_out} audio output(s) - only simple mono "
                              "(1-in/1-out) effects are supported."}
+        input_port = next(p["name"] for p in ports if p["direction"] == "input" and p["type"] == "audio")
+        output_port = next(p["name"] for p in ports if p["direction"] == "output" and p["type"] == "audio")
 
         control_ports = {p["name"]: p for p in ports
                           if p["type"] == "control" and p["direction"] == "input"}
@@ -509,7 +548,7 @@ def add_effect(label, controls=None):
 
         state["chain"].append({
             "name": name, "so_path": plugin["so_path"], "label": plugin["label"],
-            "input_port": audio_in[0]["name"], "output_port": audio_out[0]["name"],
+            "input_port": input_port, "output_port": output_port,
             "control": resolved,
         })
         save_state(state)
@@ -554,7 +593,7 @@ def set_control(name, control, value):
             return {"ok": False, "kind": "live",
                     "error": f"No effect named '{name}' in the chain. Currently loaded: {names}"}
 
-        ports = get_ports(fx["so_path"])
+        ports = get_ports(fx["so_path"], fx["label"])
         control_ports = {p["name"]: p for p in ports
                           if p["type"] == "control" and p["direction"] == "input"}
         if control not in control_ports:

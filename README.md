@@ -208,9 +208,13 @@ Selected 'iRig USB' as the active audio device.
 Selecting pins your choice in `fx-pedal-audio-device.json`, so it keeps
 being used even after a second interface gets plugged in later.
 
-### `list`
+### `list [--all]`
 
-All installed LADSPA plugins (label + name).
+Installed LADSPA plugins usable in this chain (label + name) — i.e. the
+ones `add` will actually accept. Plugins that aren't simple mono (1 audio
+in, 1 audio out) are hidden by default, since trying to `add` one just
+fails; a count of how many were hidden is shown instead of silently
+dropping them.
 
 ```
 $ fx-pedal list
@@ -218,7 +222,22 @@ foverdrive                   Fast overdrive
 chebstortion                 Chebyshev distortion
 autowah                      Auto Wah
 ...
+
+(58 plugin(s) hidden - not mono in/out, would fail `add`. Use `list --all` to see them.)
 ```
+
+`--all` shows everything, tagging each incompatible one:
+
+```
+$ fx-pedal list --all
+...
+CompressX2                   C* CompressX2 - Stereo compressor and saturating limiter  [not usable here - not mono in/out]
+...
+```
+
+A single `.so` file can bundle several differently-shaped plugins under
+different labels (`caps.so` alone has 26) — compatibility is checked and
+reported per label, not per file.
 
 ### `params <label>`
 
