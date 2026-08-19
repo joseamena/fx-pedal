@@ -1,0 +1,3 @@
+# Runtime state - regenerated per-install/per-board, never checked in
+__pycache__/
+*.pyc
