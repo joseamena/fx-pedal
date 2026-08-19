@@ -468,6 +468,40 @@ class FxConsole(cmd_module.Cmd):
             print(f"unknown nam subcommand {sub!r}")
 
     # -- housekeeping --
+    HELP_SECTIONS = [
+        ("Discovery", [
+            ("l/list", "List all installed LADSPA plugins"),
+            ("p/params", "Show a plugin's parameters (control ports)"),
+            ("c/chain", "Show the currently loaded effect chain"),
+        ]),
+        ("Chain editing", [
+            ("a/add", "Add an effect to the end of the chain"),
+            ("r/remove", "Remove an effect from the chain by name"),
+            ("s/set", "Change a control value live, no restart needed"),
+        ]),
+        ("Presets & banks", [
+            ("preset", "save/load/list/delete named snapshots of the chain"),
+            ("bank", "list/show/create/set-slot/delete/midi-map - foot-controller groups of presets"),
+        ]),
+        ("NAM model", [
+            ("nam", "get/set <path> - the .nam capture the Neural Amp Modeler plugin loads"),
+        ]),
+        ("Housekeeping", [
+            ("h/help", "Show this help ('help <command>' for full usage)"),
+            ("q/quit/exit", "Quit the console"),
+        ]),
+    ]
+
+    def do_help(self, arg):
+        "h/help [command] - List commands by category, or show one command's full usage."
+        if arg:
+            return super().do_help(arg)
+        for title, cmds in self.HELP_SECTIONS:
+            print(f"\n{title}:")
+            for name, desc in cmds:
+                print(f"  {name:<14} {desc}")
+        print("\nType 'help <command>' for full usage of any command.")
+
     def do_h(self, arg):
         "h - Show this help."
         return self.do_help(arg)
