@@ -53,6 +53,6 @@ echo "  fx-pedal add foverdrive          # try one"
 echo "  fx-pedal chain                   # see what's loaded"
 echo
 echo "Full command reference: $REPO_DIR/README.md"
-echo "Optional daemon + interactive console (like 'asterisk -r'):"
+echo "Optional daemon + interactive console:"
 echo "  systemctl --user start fx-pedal-daemon"
 echo "  fx-pedal console"

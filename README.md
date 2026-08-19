@@ -119,9 +119,9 @@ fx-pedal chain                   # see what's loaded
 **One-shot**: `fx-pedal <command> ...` runs, does one thing, exits. This is
 what every example below uses.
 
-**Daemon + interactive console**, modeled on Asterisk's `asterisk`/
-`asterisk -r` pattern — start the daemon once, then attach to it any time
-with an interactive prompt instead of a subprocess per command:
+**Daemon + interactive console**: start a background daemon once, then
+attach to it any time with an interactive prompt instead of a subprocess
+per command:
 
 ```
 systemctl --user start fx-pedal-daemon   # or: fx_daemon.py in the foreground

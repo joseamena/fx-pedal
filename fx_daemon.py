@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """FX Pedal control daemon - a persistent process holding a Unix socket
 that any client can connect to and issue fx_core commands against, without
-spawning a subprocess per command. Modeled on the Asterisk PBX pattern:
-run this as a background daemon, then attach to it interactively with
-`fx_ctl.py console` (the equivalent of `asterisk -r`).
+spawning a subprocess per command. Run this as a background daemon, then
+attach to it interactively with `fx_ctl.py console`.
 
 This is NOT required for fx_ctl.py's one-shot commands (add/remove/set/...)
 to work - those call fx_core directly, under its own file lock, regardless

@@ -8,8 +8,8 @@ Two modes:
   fx_ctl.py <command> ...   one-shot (calls fx_core directly, works with
                              or without the daemon running)
   fx_ctl.py console         interactive prompt attached to the fx-pedal
-                             daemon (like `asterisk -r`) - start the daemon
-                             first with `python3 fx_daemon.py` or
+                             daemon - start the daemon first with
+                             `python3 fx_daemon.py` or
                              `systemctl --user start fx-pedal-daemon`
 
 See README.md next to this file for the full command reference and worked
@@ -526,8 +526,9 @@ def main():
     p.add_argument("--all", action="store_true", help="Include empty slots too")
     p.set_defaults(func=cmd_bank_midi_map)
 
-    sub.add_parser("console", help="Interactive console attached to the fx-pedal daemon "
-                                    "(like 'asterisk -r')").set_defaults(func=cmd_console)
+    sub.add_parser("console",
+                   help="Interactive console attached to the fx-pedal daemon"
+                   ).set_defaults(func=cmd_console)
 
     audio = sub.add_parser("audio-device", help="Pick which USB audio interface the pedal uses")
     audio_sub = audio.add_subparsers(dest="audio_cmd", required=True)
