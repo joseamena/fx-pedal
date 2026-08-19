@@ -28,22 +28,13 @@ later without any redesign.
 Getting a USB audio interface talking to this board reliably was the
 hardest part of this whole project — harder than any of the software. If
 `lsusb` doesn't show your interface at all, or it shows up and then
-disconnects every ~30 seconds, it's almost certainly one of these three
-things, in the order to check them:
+disconnects every ~30 seconds, it's almost certainly one of these two
+things, in the order to check them. **The single biggest lever: use a
+good externally-powered USB hub between the board and your interface** —
+specifically, the Arduino-branded hub bundled with the UNO Q is confirmed
+working, plugged in with a plain USB-C-to-USB-C cable.
 
-### 1. Cable type — use USB-A-to-USB-C, not USB-C-to-USB-C
-
-USB-C ports negotiate host/device role and power delivery live, over the
-cable's CC pins. On this board, USB-C-to-USB-C cables failed in two
-different ways: the board getting stuck in **device** mode (so it never
-becomes a USB host at all — see #2), and a USB-C hub that wouldn't power on
-at all from a C-to-C cable. **USB-A-to-USB-C cables sidestep this entirely**
-— the USB-A end does no CC-pin negotiation, so power and role are fixed and
-simple. Standardize on A-to-C for every link in the chain (board↔hub,
-hub↔wall power) unless you've specifically verified a C-to-C cable works
-for yours.
-
-### 2. Board stuck in USB *device* mode instead of *host* mode
+### 1. Board stuck in USB *device* mode instead of *host* mode
 
 Check: `lsusb` should list more than just root hubs. If it's empty (or only
 shows `1d6b:0002`/`1d6b:0003` Linux root hubs with nothing behind them),
@@ -55,19 +46,34 @@ read-only and can keep reporting `device` even when the port is genuinely
 acting as a host. Trust `lsusb` instead.
 
 Fixes, in order of preference:
-- **Use a real USB hub with its own power supply**, connected via a
-  USB-A-to-USB-C cable, rather than plugging the interface straight into
-  the board. This alone got host mode working reliably in this project —
-  no manual override needed.
+- **Use a real, externally-powered USB hub between the board and your
+  interface**, rather than plugging the interface straight into the board.
+  Specifically, the **Arduino-branded hub bundled with the UNO Q** (the one
+  with an Ethernet port) got this working reliably in this project, over a
+  plain USB-C-to-USB-C cable — no manual override, no cable gymnastics
+  needed. Not every hub behaves the same here (see #2 below for a
+  topology-related failure mode with a different hub), so if a random hub
+  doesn't work, trying this specific one is worth it before assuming
+  something's wrong with the board.
 - If that's not enough, force it: `sudo sh -c 'echo host >
   /sys/kernel/debug/usb/4e00000.usb/mode'`. This directly overrides the
-  DWC3 USB controller's mode via debugfs, bypassing the CC-pin negotiation
-  that was getting it wrong. **Not persistent** — resets on reboot. (There's
-  a small community fix — search "arduino-uno-q-usb-fix" — that turns this
+  DWC3 USB controller's mode via debugfs, bypassing whatever the CC-pin
+  negotiation got wrong. **Not persistent** — resets on reboot. (There's a
+  small community fix — search "arduino-uno-q-usb-fix" — that turns this
   into a boot-time systemd service if you want it permanent; read it before
   running it, same as with any third-party root-level script.)
 
-### 3. Interface enumerates, then disconnects on a repeating cycle
+**A note on cable type**, since this project's own notes went back and
+forth on it: USB-C-to-USB-C cables were suspected as a cause early on
+(seen failing both "stuck in device mode" and "hub wouldn't power on at
+all" with a *different*, lower-quality hub), but **the actual working
+setup ended up being all USB-C-to-USB-C, with the Arduino-branded hub** —
+so the hub itself, not the cable type, looks like it was the real
+variable. Don't rule out a C-to-C cable on the strength of this alone; if
+you hit connection trouble, suspect the hub/cable combination together
+rather than assuming either one in isolation.
+
+### 2. Interface enumerates, then disconnects on a repeating cycle
 
 Symptom: `dmesg` shows the interface enumerate, then fail (`Feature Unit`
 control errors, HID `-71`/EPROTO), then `USB disconnect` — repeating every
