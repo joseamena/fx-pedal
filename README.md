@@ -23,6 +23,73 @@ later without any redesign.
   (Debian/Ubuntu package names — `install.sh` checks for these and tells
   you the exact command if any are missing)
 
+## Hardware setup — read this before `install.sh`, especially on a UNO Q
+
+Getting a USB audio interface talking to this board reliably was the
+hardest part of this whole project — harder than any of the software. If
+`lsusb` doesn't show your interface at all, or it shows up and then
+disconnects every ~30 seconds, it's almost certainly one of these three
+things, in the order to check them:
+
+### 1. Cable type — use USB-A-to-USB-C, not USB-C-to-USB-C
+
+USB-C ports negotiate host/device role and power delivery live, over the
+cable's CC pins. On this board, USB-C-to-USB-C cables failed in two
+different ways: the board getting stuck in **device** mode (so it never
+becomes a USB host at all — see #2), and a USB-C hub that wouldn't power on
+at all from a C-to-C cable. **USB-A-to-USB-C cables sidestep this entirely**
+— the USB-A end does no CC-pin negotiation, so power and role are fixed and
+simple. Standardize on A-to-C for every link in the chain (board↔hub,
+hub↔wall power) unless you've specifically verified a C-to-C cable works
+for yours.
+
+### 2. Board stuck in USB *device* mode instead of *host* mode
+
+Check: `lsusb` should list more than just root hubs. If it's empty (or only
+shows `1d6b:0002`/`1d6b:0003` Linux root hubs with nothing behind them),
+the board's USB-C port has come up as a device (sink), not a host — it
+can't see anything plugged into it.
+
+**Don't trust `/sys/class/typec/port0/data_role`** — on this board it's
+read-only and can keep reporting `device` even when the port is genuinely
+acting as a host. Trust `lsusb` instead.
+
+Fixes, in order of preference:
+- **Use a real USB hub with its own power supply**, connected via a
+  USB-A-to-USB-C cable, rather than plugging the interface straight into
+  the board. This alone got host mode working reliably in this project —
+  no manual override needed.
+- If that's not enough, force it: `sudo sh -c 'echo host >
+  /sys/kernel/debug/usb/4e00000.usb/mode'`. This directly overrides the
+  DWC3 USB controller's mode via debugfs, bypassing the CC-pin negotiation
+  that was getting it wrong. **Not persistent** — resets on reboot. (There's
+  a small community fix — search "arduino-uno-q-usb-fix" — that turns this
+  into a boot-time systemd service if you want it permanent; read it before
+  running it, same as with any third-party root-level script.)
+
+### 3. Interface enumerates, then disconnects on a repeating cycle
+
+Symptom: `dmesg` shows the interface enumerate, then fail (`Feature Unit`
+control errors, HID `-71`/EPROTO), then `USB disconnect` — repeating every
+~30 seconds indefinitely.
+
+This turned out to be about **hub topology, not power or drivers**. A
+2-port hub that put the interface 3 tiers deep behind cascaded internal hub
+chips (`lsusb -t` showing something like
+`root_hub → Hub → Hub → your-interface`) reproduced this reliably. The
+fix was switching to a different hub whose internal port layout put the
+interface only 1 tier deep. If you hit this: try a different hub, or a
+different port on the same hub — `lsusb -t` will show you exactly how deep
+your interface sits, and shallower is better. USB autosuspend was ruled out
+as a cause in this project (`/sys/module/usbcore/parameters/autosuspend`
+disabled globally made no difference) — don't waste time there first.
+
+### Once your interface shows up cleanly
+
+`aplay -l` / `arecord -l` should list it as a card. From there,
+`fx-pedal audio-device list` (after installing, below) should detect it
+automatically — no manual configuration needed.
+
 ## Install
 
 ```
@@ -296,6 +363,29 @@ long-running process), `fx_daemon.py` (the socket server),
 
 None of the runtime state is checked into this repo (see `.gitignore`) —
 it's regenerated per-install/per-board.
+
+## Design note: why this is a plain PipeWire config, not an "Arduino App"
+
+On a UNO Q, the obvious way to package something like this is as an
+`arduino-app-cli` App (Docker container, managed lifecycle, `app start`/
+`app logs`). That was the first version — and it worked, but with real
+round-trip latency in the **40–90ms** range, because the App container has
+no path to real-time thread scheduling (no `/run/dbus`, no `cap_add`,
+unprivileged). Moving the exact same PipeWire `filter-chain` config to run
+directly in the host's own PipeWire session (what `install.sh` sets up)
+turned out to *not* fix real-time scheduling either — that's a separate,
+harder constraint (`rtkit-daemon` wants an actively logged-in seated
+session, which a headless board doesn't have) — but it did let the graph's
+**quantum** (buffer size) be tuned down safely, based on where xruns
+actually start under normal (non-realtime) scheduling: clean up to 192–256
+samples (~4–5ms/cycle) on this hardware, glitching from ~128 samples down.
+That's what `fx_core.py` sets by default, bringing round-trip latency to
+roughly **10–15ms** — usable for real-time monitoring, without needing
+real-time scheduling at all. If you're adapting this for different
+hardware, that xrun cliff is worth re-measuring rather than assumed (`pw-
+metadata -n settings 0 clock.force-quantum <N>` to test a value, `pw-top -b`
+to watch the `ERR` column for a stable window before trusting it — the
+counter is cumulative, diff two samples rather than reading one).
 
 ## Writing another interface against this
 
